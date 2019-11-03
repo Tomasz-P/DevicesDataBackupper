@@ -60,7 +60,7 @@ def main():
     """Funkcja główna."""
     try:
         print('Uruchomiono program.')
-        CONFIG_FILENAME = 'config_file_home.ini'
+        CONFIG_FILENAME = 'config_file.ini'
         CFG_GENERAL_PARAMETERS = 'general_parameters'
         CFG_LOGFILENAME = 'logfilename'
         CFG_LOG_LEVEL = 'log_level'
