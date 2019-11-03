@@ -1,5 +1,5 @@
 """
-Moduł umożliwiający obsługę urządzeń pod względem zrzutów ich konfiguracji.
+Moduł umożliwiający backup danych konfiguracyjnych ze wskazanych urządzeń do plików.
 """
 
 import configparser
