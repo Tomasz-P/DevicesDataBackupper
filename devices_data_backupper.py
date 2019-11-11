@@ -1,12 +1,12 @@
 """
 Moduł umożliwiający backup danych konfiguracyjnych ze wskazanych urządzeń do plików.
+Wersja 1.2
+Autor: Tomasz Piętka
 """
 
-import configparser
-import paramiko
+import configparser, paramiko, logging, re
 from pathlib import Path
 from datetime import datetime
-import logging
 
 
 # KLASY
@@ -16,6 +16,7 @@ class DeviceDataBackupper(object):
     def __init__(self, config_filename):
         """Konstruktor klasy do obsługi zrzucania danych konfiguracyjnych z urządzeń."""
         self.CONFIG_FILENAME = config_filename
+        self.__DETAIL_CMD_REGEX = re.compile(r'^(.*\w)(\s*<)(.*\w)(\s*;)(\s*)(\d*)(>)(.*$)')
         self.__DEVICES_SECTION = 'devices'
         self.__GENERAL_PARAMETERS = 'general_parameters'
         self.__bkpfiles_directory = 'bkpfiles_directory'
@@ -103,19 +104,45 @@ class DeviceDataBackupper(object):
                                   password=device_parameters[self.__device_password], timeout=self.__device_timeout)
             logging.info(f'Connection to device {device} established on {device_parameters[self.__device_ipaddress]}:{device_parameters[self.__device_port]}')
             for filename_suffix in device_command_set.keys():
+                simple_commands, detail_commands = self.segregate_commands(device_command_set, filename_suffix)
                 backup_filename = self.create_filename(device, filename_suffix)
                 file_stamp = self.create_filestamp(device)
                 self.write_data_to_file(file_stamp, backup_filename)
                 logging.debug(f'File stamp: {file_stamp} written to backup file: {backup_filename}')
-                for command in device_command_set[filename_suffix]:
-                    command_header = self.create_command_header(command)
-                    self.write_data_to_file(command_header, backup_filename)
-                    logging.debug(f'File command header: {command_header} written to backup file: {backup_filename}')
-                    stdin, stdout, stderr = devconnection.exec_command(command)
-                    logging.debug(f'Data for command: {command} downloaded from device: {device}')
-                    device_textdata = self.convert_listdata_to_textdata(stdout.readlines())
-                    self.write_data_to_file(device_textdata, backup_filename)
-                    logging.info(f'Data written to file: {backup_filename}')
+                if simple_commands:
+                    for simple_command in simple_commands:
+                        command_header = self.create_command_header(simple_command)
+                        self.write_data_to_file(command_header, backup_filename)
+                        logging.debug(f'File command header: {command_header} written to backup file: {backup_filename}')
+                        stdin, stdout, stderr = devconnection.exec_command(simple_command)
+                        logging.debug(f'Data for command: {simple_command} downloaded from device: {device}')
+                        device_textdata = self.convert_listdata_to_textdata(stdout.readlines())
+                        self.write_data_to_file(device_textdata, backup_filename)
+                    logging.info(f'Data for simple commands {simple_commands} written to file: {backup_filename}')
+                if detail_commands:
+                    for detail_command in detail_commands:
+                        matched_detail_cmd = re.search(self.__DETAIL_CMD_REGEX, detail_command)
+                        main_cmd = matched_detail_cmd.group(1)
+                        listing_cmd = matched_detail_cmd.group(3)
+                        main_cmd_args_column_id = matched_detail_cmd.group(6)
+                        logging.debug(f'Detail command transformed -> main_command: {main_cmd} ; listing_command: '
+                                      f'{listing_cmd} ; variables column id: {main_cmd_args_column_id}')
+                        stdin, stdout, stderr = devconnection.exec_command(listing_cmd)
+                        logging.debug(f'Data for command: {listing_cmd} downloaded from device: {device}')
+                        listing_command_data = stdout.readlines()[1:]
+                        main_cmd_args = [position.split()[int(main_cmd_args_column_id) - 1] for position in listing_command_data]
+                        logging.debug(f'Variables extracted from column id {main_cmd_args_column_id} : {main_cmd_args}')
+                        for main_cmd_arg in main_cmd_args:
+                            command_with_arg = main_cmd + ' ' + main_cmd_arg
+                            command_header = self.create_command_header(command_with_arg)
+                            self.write_data_to_file(command_header, backup_filename)
+                            logging.debug(
+                                f'File command header: {command_header} written to backup file: {backup_filename}')
+                            stdin, stdout, stderr = devconnection.exec_command(command_with_arg)
+                            logging.debug(f'Data for command: {command_with_arg} downloaded from device: {device}')
+                            device_textdata = self.convert_listdata_to_textdata(stdout.readlines())
+                            self.write_data_to_file(device_textdata, backup_filename)
+                    logging.info(f'Data for detail commands {detail_commands} written to file: {backup_filename}')
             devconnection.close()
             logging.info(f'Connection to device: {device} closed')
         except paramiko.BadHostKeyException as bhke:
@@ -137,6 +164,17 @@ class DeviceDataBackupper(object):
             logging.error(f'Connection error occurred for device: {device}', exc_info=True)
             print(f'\nWYSTĄPIŁ BŁĄD W TRAKCIE POŁĄCZENIA Z URZĄDZENIEM {device}!!!')
             print('Sprawdź log programu, aby poznać szczegóły.')
+
+    def segregate_commands(self, device_command_set, filename_suffix):
+        """Segragacja komend - zostają podzielone na dwie grupy: komendy proste
+        oraz komendy złożone, które potrzebują argumentu. Argument pobierany jest
+        z komendy prostej
+        """
+        simple_cmds = [cmd for cmd in device_command_set[filename_suffix]
+                       if not re.search(self.__DETAIL_CMD_REGEX, cmd)]
+        detail_cmds = [cmd for cmd in device_command_set[filename_suffix]
+                       if re.search(self.__DETAIL_CMD_REGEX, cmd)]
+        return simple_cmds, detail_cmds
 
     def convert_listdata_to_textdata(self, listdata):
         """Przekształcenie danych pobranych z urządzenia w formacie listy na dane w postaci tekstu - linia po linii."""
