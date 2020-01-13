@@ -16,7 +16,7 @@ class DeviceDataBackupper(object):
     def __init__(self, config_filename):
         """Konstruktor klasy do obsługi zrzucania danych konfiguracyjnych z urządzeń."""
         self.CONFIG_FILENAME = config_filename
-        self.__DETAIL_CMD_REGEX = re.compile(r'^(.*\w)(\s*<)(.*\w)(\s*;)(\s*)(\d*)(>)(.*$)')
+        self.__DETAIL_CMD_REGEX = re.compile(r'^(.*\w)(\s*<)(.*\w)(\s*;)(\s*)(\d*)(\s*;)(\s*)(.*\w)(>)(.*$)')
         self.__DEVICES_SECTION = 'devices'
         self.__GENERAL_PARAMETERS = 'general_parameters'
         self.__bkpfiles_directory = 'bkpfiles_directory'
@@ -125,11 +125,15 @@ class DeviceDataBackupper(object):
                         main_cmd = matched_detail_cmd.group(1)
                         listing_cmd = matched_detail_cmd.group(3)
                         main_cmd_args_column_id = matched_detail_cmd.group(6)
+                        header_line = matched_detail_cmd.group(9)
                         logging.debug(f'Detail command transformed -> main_command: {main_cmd} ; listing_command: '
                                       f'{listing_cmd} ; variables column id: {main_cmd_args_column_id}')
                         stdin, stdout, stderr = devconnection.exec_command(listing_cmd)
                         logging.debug(f'Data for command: {listing_cmd} downloaded from device: {device}')
-                        listing_command_data = stdout.readlines()[1:]
+                        if header_line == 'no-header':
+                            listing_command_data = stdout.readlines()[1:]
+                        else:
+                            listing_command_data = stdout.readlines()
                         main_cmd_args = [position.split()[int(main_cmd_args_column_id) - 1] for position in listing_command_data]
                         logging.debug(f'Variables extracted from column id {main_cmd_args_column_id} : {main_cmd_args}')
                         for main_cmd_arg in main_cmd_args:
